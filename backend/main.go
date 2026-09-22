@@ -20,6 +20,7 @@ import (
 
 	"be_homework_center/backend/internal/db"
 	"be_homework_center/backend/internal/handler"
+	"be_homework_center/backend/internal/oidc"
 	"be_homework_center/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,7 @@ func main() {
 		ref       = flag.String("ref", "main", "模板仓库分支")
 		syncEvery = flag.Duration("sync-every", 30*time.Minute, "模板仓库同步间隔")
 		webDir    = flag.String("web", "", "前端构建产物目录；设置后由后端托管 SPA（同源部署）")
+		oidcAud   = flag.String("oidc-aud", "", "上报鉴权 audience；非空时 POST /reports 仅接受 GitHub Actions OIDC 令牌")
 	)
 	flag.Parse()
 	gin.SetMode(gin.ReleaseMode)
@@ -67,7 +69,17 @@ func main() {
 	api := g.Group("/api/v1")
 	api.GET("/overview", handler.Overview(svc))
 	api.GET("/leaderboard", handler.Leaderboard(svc))
-	api.POST("/reports", handler.Report(svc))
+	reports := []gin.HandlerFunc{}
+	if *oidcAud != "" {
+		verifier, err := oidc.New(ctx, *oidcAud)
+		if err != nil {
+			log.Fatalf("初始化 OIDC 验证器: %v", err)
+		}
+		reports = append(reports, handler.OIDCAuth(verifier))
+		log.Printf("上报鉴权已启用: 仅接受 audience=%s 的 GitHub Actions OIDC 令牌", *oidcAud)
+	}
+	reports = append(reports, handler.Report(svc))
+	api.POST("/reports", reports...)
 
 	g.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 

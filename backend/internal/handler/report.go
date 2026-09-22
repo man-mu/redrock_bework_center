@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"be_homework_center/backend/internal/oidc"
 	"be_homework_center/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -40,15 +41,24 @@ func Report(svc *service.Service) gin.HandlerFunc {
 			return
 		}
 
+		// 已验签的令牌声明透传给 service 做绑定校验；未启用鉴权时为 nil。
+		var ident *service.Identity
+		if v, ok := c.Get(claimsKey); ok {
+			if cl, ok := v.(oidc.Claims); ok {
+				ident = &service.Identity{Repository: cl.Repository, SHA: cl.SHA}
+			}
+		}
+
 		res, err := svc.Report(c.Request.Context(), &service.ReportInput{
-			RepoURL: body.RepoURL,
-			Commit:  body.Commit,
-			Ref:     body.Ref,
-			Event:   body.Event,
-			Name:    body.Config.Name,
-			Lesson:  body.Result.Lesson,
-			Tests:   body.Result.Tests,
-			Payload: string(raw),
+			RepoURL:  body.RepoURL,
+			Commit:   body.Commit,
+			Ref:      body.Ref,
+			Event:    body.Event,
+			Name:     body.Config.Name,
+			Lesson:   body.Result.Lesson,
+			Tests:    body.Result.Tests,
+			Payload:  string(raw),
+			Identity: ident,
 		})
 		if err != nil {
 			respondError(c, err)

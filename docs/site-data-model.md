@@ -84,6 +84,8 @@ Content-Type: application/json
 | 202 | 已接收 | 正常入库 |
 | 200 + `{"deduplicated": true}` | 重复 | 同一 `repo` + `commit` 已收过，直接返回，**不重复计数** |
 | 400 | `invalid_payload` | JSON 无法解析，或 `repo_url` / `commit` / `result` 缺失 |
+| 401 | `invalid_token` | 站点启用上报鉴权后，Bearer 令牌缺失或非 GitHub 签发的有效 OIDC 令牌 |
+| 403 | `repository_mismatch` / `commit_mismatch` | OIDC 令牌声明的仓库 / commit 与载荷不一致 |
 | 422 | `unknown_lesson` | `result.lesson` 不在 `lessons` 表里 |
 
 ### 3.3 两条硬约束

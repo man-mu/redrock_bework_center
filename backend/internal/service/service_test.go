@@ -150,6 +150,52 @@ func TestReportLifecycle(t *testing.T) {
 	}
 }
 
+func TestReportIdentityBinding(t *testing.T) {
+	svc, d := newTestService(t)
+	seedLesson(t, d, 1, "lesson-01-basics", "basics", "test01", "test02", "test03")
+
+	valid := &ReportInput{
+		RepoURL: testRepoURL, // zhangsan/redrock_backend_practice_2026
+		Commit:  "9f2c1ab7c3d4e5f60718293a4b5c6d7e8f901234",
+		Event:   "push",
+		Lesson:  "lesson-01-basics",
+		Tests:   makeTests(2, 0),
+	}
+	ctx := context.Background()
+
+	// 令牌仓库与上报仓库不一致 → BindError，零副作用
+	in := *valid
+	in.Identity = &Identity{Repository: "attacker/other_repo", SHA: valid.Commit}
+	if _, err := svc.Report(ctx, &in); !errors.As(err, new(*BindError)) {
+		t.Fatalf("仓库不匹配应返回 BindError, got %v", err)
+	}
+	if n := countRows(t, d, `SELECT COUNT(*) FROM students`); n != 0 {
+		t.Fatalf("403 之后 students 应为空, got %d", n)
+	}
+
+	// 令牌 SHA 与上报 commit 不一致 → BindError
+	in = *valid
+	in.Identity = &Identity{Repository: "zhangsan/redrock_backend_practice_2026", SHA: "deadbeef"}
+	if _, err := svc.Report(ctx, &in); !errors.As(err, new(*BindError)) {
+		t.Fatalf("commit 不匹配应返回 BindError, got %v", err)
+	}
+
+	// 完全一致 → 通过；SHA 大小写不同也应通过（GitHub SHA 恒小写，此处从宽兜底）
+	in = *valid
+	in.Identity = &Identity{
+		Repository: "zhangsan/redrock_backend_practice_2026",
+		SHA:        strings.ToUpper(valid.Commit),
+	}
+	if _, err := svc.Report(ctx, &in); err != nil {
+		t.Fatalf("一致的身份应通过（含大小写差异）: %v", err)
+	}
+
+	// Identity 为 nil（未启用鉴权）→ 与旧行为一致
+	if _, err := svc.Report(ctx, valid); err != nil {
+		t.Fatalf("未启用鉴权时不应受影响: %v", err)
+	}
+}
+
 func TestReportValidation(t *testing.T) {
 	svc, d := newTestService(t)
 	seedLesson(t, d, 1, "lesson-01-basics", "basics", "test01")

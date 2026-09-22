@@ -34,6 +34,7 @@
 | `--db` | SQLite 数据库路径（单文件，单写者） |
 | `--web` | 前端构建产物目录；设置后由后端同源托管 SPA |
 | `--addr` | HTTP 监听地址，默认 `:8080`（容器部署映射到宿主 18080） |
+| `--oidc-aud <audience>` | 上报鉴权开关。**非空时** `POST /api/v1/reports` 仅接受 GitHub Actions 签发的 OIDC 令牌（`Authorization: Bearer`），audience 必须与此值一致；留空则上报不鉴权（本地调试 / 灰度期用）。部署侧经 `OIDC_AUD` 注入，约定值 `homework-center` |
 | `GITHUB_TOKEN` | 可选。提升模板仓库同步的 GitHub API 限额（60 → 5000 req/h） |
 
 课次与题目全集的识别规则：
@@ -51,12 +52,12 @@
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/api/v1/reports` | 无 | 上传一次报告 |
+| POST | `/api/v1/reports` | Bearer OIDC 令牌（启用 `--oidc-aud` 后必填） | 上传一次报告 |
 | GET | `/api/v1/overview` | 无 | 每课提交学生数 + 题目全集 |
 | GET | `/api/v1/leaderboard` | 无 | 按完成题数排行（支持课次过滤与关键字搜索） |
 | GET | `/healthz` | 无 | 健康检查 |
 
-读接口与上报接口**全部开放，无鉴权、无限流**。响应带 `Access-Control-Allow-Origin: *`（允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type`），方便前端分离部署调试。
+读接口与健康检查**开放无鉴权**。上报接口默认开放；站点启用 `--oidc-aud` 后，只接受 GitHub Actions 的 OIDC 令牌（见 §4.1 鉴权）。响应带 `Access-Control-Allow-Origin: *`（允许方法 `GET, POST, OPTIONS`，允许头 `Content-Type, Authorization`），方便前端分离部署调试。
 
 健康检查：
 
@@ -76,8 +77,23 @@ GET /healthz
 
 ```
 POST /api/v1/reports
+Authorization: Bearer <GitHub Actions OIDC 令牌>
 Content-Type: application/json
 ```
+
+#### 鉴权（站点启用 `--oidc-aud` 后必填）
+
+站点只接受 **GitHub 在真实 workflow run 内签发的 OIDC ID Token**（短时效 JWT，私钥始终在 GitHub 手里，无法伪造）：
+
+- 练习仓库 workflow 声明 `permissions: id-token: write` 后，CI 用 runner 预置的 `ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN` 取回令牌（取法见 §6）；
+- 站点用 GitHub 的 JWKS 公钥（`https://token.actions.githubusercontent.com/.well-known/jwks`）验签，并校验 `iss`、`aud`（= `--oidc-aud`）、`exp`；
+- **身份绑定**（强校验，防拿别处令牌冒名）：
+  - 令牌 `repository` 声明必须与载荷 `repo_url` 解析出的 `owner/name` 一致；
+  - 令牌 `sha` 声明必须与载荷 `commit` 一致。
+
+由此得到防伪闭环：令牌只能由 GitHub 在真实 run 里签发；学生只能为自己的仓库、自己那次 push 的 commit 上报。想刷分只能真跑 Actions，而真跑就等于真做题。
+
+未启用 `--oidc-aud` 时（本地调试 / 灰度期），本节全部跳过，接口行为与旧版一致。
 
 ```json
 {
@@ -137,13 +153,15 @@ Content-Type: application/json
 | HTTP | 响应体 | 触发条件 |
 | --- | --- | --- |
 | 400 | `{"error": "invalid_payload", "detail": "..."}` | JSON 无法解析；`repo_url` / `commit` / `result` / `result.tests` 缺失；`repo_url` 解析不出 `owner/name`；`event` 不是 `push`；`tests[].status` 不是 `pass` / `fail` |
+| 401 | `{"error": "invalid_token", "detail": "..."}` | 启用鉴权后：缺少 `Authorization: Bearer`；令牌不是 GitHub 签发的有效 OIDC 令牌（验签失败 / `iss`、`aud`、`exp` 不符） |
+| 403 | `{"error": "repository_mismatch", "detail": "..."}` / `{"error": "commit_mismatch", "detail": "..."}` | 令牌 `repository` / `sha` 声明与载荷 `repo_url` / `commit` 不一致（身份与载荷绑定失败） |
 | 422 | `{"error": "unknown_lesson", "lesson": "..."}` | `result.lesson` 不在站点的课次表里（含课次为空、站点未配置模板仓库） |
 | 500 | `{"error": "internal"}` | 站点内部错误 |
 | 404 | `{"error": "not_found"}` | 未注册的 API 路径（站点同源托管 SPA 时） |
 
-三条规则：
+四条规则：
 
-- **4xx 零副作用**：全部校验（能否解析、课次是否合法）在任何写入之前完成，被拒的上报不会留下半条记录；
+- **4xx 零副作用**：全部校验（令牌绑定、能否解析、课次是否合法）在任何写入之前完成，被拒的上报不会留下半条记录；
 - **422 是永久性失败**——改对载荷或等站点同步到新课次后重新 push 才有意义，重试同一份载荷没有用；
 - **上传失败不得影响练习仓库的流水线结论**：调用方把非 2xx、超时、连接失败都视为「未送达」。
 
@@ -219,10 +237,27 @@ GET /api/v1/leaderboard?lesson=&q=
 站点可以依赖的行为：
 
 - **触发**：只有默认分支 `main` 的 `push` 触发流水线，Pull Request 与其他分支不跑，所以 `event` 恒为 `push`、`ref` 恒为 `refs/heads/main`；
+- **身份令牌**（站点启用 `--oidc-aud` 后必需）：
+  - workflow（或上报所在 job）声明 `permissions: id-token: write`；
+  - `notify_center.py` 上报前用 runner 预置环境变量取回令牌，并以 `Authorization: Bearer <token>` 头随报告一起发送：
+
+    ```python
+    import json, os, urllib.request
+
+    url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=homework-center"
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+    token = json.load(urllib.request.urlopen(req))["value"]
+    ```
+
+  - audience 必须与站点 `--oidc-aud` 一致（约定 `homework-center`）；
+  - 令牌时效约 5 分钟，取回后立即使用，不要缓存到跨 job；
 - **站点地址**来自学生仓库根目录 `config.json` 的 `center`，由 `check_config.py` 解析后写进 `CENTER_API`；缺失时练习仓库跳过上传（因此**模板仓库必须在发布前预置真实的 center 地址**，否则学生的报告无处可去）；
 - **载荷**：`config` 是 `config.json` 去掉 `center` 后的内容；`result` 由 `result.json` 压缩而来，只留课次与逐题结论；
-- **重试**：上传失败最多退避重试 3 次（间隔 1s / 3s），对 4xx 也会重试——无害但略浪费（站点对 4xx 零副作用）；
+- **重试**：上传失败最多退避重试 3 次（间隔 1s / 3s），对 4xx 也会重试——无害但略浪费（站点对 4xx 零副作用）；401 时应先重新取一枚令牌再重试；
 - **成绩是尽力而为的**：上传成败不影响流水线结论，完整报告随 artifact `go-test-<sha>` 留存，可事后补取。
+
+模板仓库（练习仓库）侧需同步完成 OIDC 改造：workflow 声明 `id-token: write`、`notify_center.py` 取令牌并携带 `Authorization` 头、401 时刷新令牌重试——改造规格文档由练习仓库维护，不在本仓库存档。
 
 ---
 

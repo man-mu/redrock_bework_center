@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -44,6 +45,19 @@ func (s *Service) Report(ctx context.Context, in *ReportInput) (*ReportResult, e
 	}
 	repo := owner + "/" + name
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// 0) 令牌身份与载荷绑定（GitHub 仅在真实 workflow run 内签发令牌，
+	//    repository/sha 与载荷一致才可入库）；GitHub SHA 恒小写，用不区分大小写比较兜底。
+	if in.Identity != nil {
+		if !strings.EqualFold(in.Identity.Repository, repo) {
+			return nil, &BindError{Field: "repository",
+				Detail: fmt.Sprintf("令牌仓库 %s 与上报仓库 %s 不一致", in.Identity.Repository, repo)}
+		}
+		if !strings.EqualFold(in.Identity.SHA, in.Commit) {
+			return nil, &BindError{Field: "commit",
+				Detail: fmt.Sprintf("令牌 commit %s 与上报 commit %s 不一致", in.Identity.SHA, in.Commit)}
+		}
+	}
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

@@ -15,6 +15,9 @@ services:
       - --web=/srv/web
       - --repo=${TEMPLATE_REPO:-}
       - --sync-every=30m
+      # 上报鉴权：非空时 /reports 仅接受 GitHub Actions OIDC 令牌（audience 须与此一致）。
+      # 启用顺序：先给模板仓库 workflow 加 id-token 权限并上报带令牌，再在此配置并重建容器。
+      - --oidc-aud=${OIDC_AUD:-}
     networks:
       - dashboard-net
     volumes:

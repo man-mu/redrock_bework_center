@@ -13,7 +13,7 @@ flowchart LR
     BE["后端 Gin + SQLite"]
     FE["React 看板<br/>（每课总览 / 排行榜）"]
 
-    CI -- "POST /api/v1/reports" --> BE
+    CI -- "POST /api/v1/reports<br/>（Bearer OIDC 令牌）" --> BE
     TR -- "定时同步（默认 30 分钟）" --> BE
     BE -- "同源托管 API + 静态资源" --> FE
 ```
@@ -33,9 +33,11 @@ flowchart LR
 学生「Use this template」建出自己的仓库
   → 填 config.json（姓名、课次、中心地址）
   → 做题，push 到 main
-  → CI 校验配置 → 只跑所选课次的 go test → 把逐题结论上报本站
+  → CI 校验配置 → 只跑所选课次的 go test → 取 GitHub OIDC 令牌，把逐题结论上报本站
   → 看板更新该学生该课次的完成题数
 ```
+
+**上报鉴权**：站点启用 `--oidc-aud` 后，`POST /api/v1/reports` 只接受 GitHub Actions 签发的 OIDC 令牌，且令牌声明的仓库 / commit 必须与载荷一致——外部直接 POST 无法再刷榜。鉴权细节见 [docs/center-site-api.md](docs/center-site-api.md) §4.1；模板仓库侧需同步改造（workflow 取 OIDC 令牌上报），规格由练习仓库维护。
 
 两边的职责边界：
 

@@ -28,6 +28,11 @@ func respondError(c *gin.Context, err error) {
 		badRequest(c, ve.Detail)
 		return
 	}
+	var be *service.BindError
+	if errors.As(err, &be) {
+		c.JSON(http.StatusForbidden, gin.H{"error": be.Field + "_mismatch", "detail": be.Detail})
+		return
+	}
 	var ue *service.UnknownLessonError
 	if errors.As(err, &ue) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "unknown_lesson", "lesson": ue.Lesson})
