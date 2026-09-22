@@ -1,0 +1,5 @@
+# 生产环境叠加文件（AGENTS.md §5.4：仅生产允许 restart: always）
+# 用法：docker compose -f compose.yaml -f compose.prod.yaml up -d
+services:
+  dashboard:
+    restart: always

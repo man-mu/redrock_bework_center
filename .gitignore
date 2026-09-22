@@ -1,0 +1,11 @@
+# 运行时产物
+*.db
+*.db-wal
+*.db-shm
+
+# 密钥与本地环境配置
+.env
+
+# 工具生成目录
+.workbuddy/
+.DS_Store

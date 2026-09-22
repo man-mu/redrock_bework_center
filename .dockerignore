@@ -1,0 +1,10 @@
+# 构建上下文瘦身：加速镜像构建，避免敏感文件进入镜像层
+.git
+.workbuddy
+.env
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+frontend/node_modules
+frontend/dist
