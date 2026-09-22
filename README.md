@@ -2,7 +2,7 @@
 
 红岩网校后端课程的**作业统计看板**：接收学生练习仓库 CI 上报的自测报告，聚合成每课总览与完成度排行榜。
 
-学生侧练习仓库：[jack-wang-176/redrock_backend_practice_2026](https://github.com/jack-wang-176/redrock_backend_practice_2026)（私有）
+学生侧练习仓库：[jack-wang-176/redrock_backend_practice_2026](https://github.com/jack-wang-176/redrock_backend_practice_2026)
 
 ## 整体架构
 
@@ -42,4 +42,4 @@ flowchart LR
 | 仓库 | 负责什么 | 不负责什么 |
 |---|---|---|
 | 练习仓库（学生侧） | 题目、starter、测试，跑测试并产出报告 | 不存储成绩 |
-| 本仓库（统计中心） | 校验、接收、聚合、展示；题目全集以模板仓库为准 | 不执行学生代码、不复算、不做防作弊——成绩是学生 CI 的自报值 |
+| 本仓库（统计中心） | 校验、接收、聚合、展示；题目全集以模板仓库为准 | 只统计作业结果 |
